@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>oauthindie — Example Sign-in</title>
+</head>
+<body>
+  <h1>oauthindie — Example Sign-in</h1>
+  <p>Enter your IndieAuth URL (or use the test provider).</p>
+
+  <form action="?oauthindie=start" method="post">
+    <label for="url">Identity URL:</label>
+    <input id="url" name="url" type="url" placeholder="https://example.com" value="https://orwell.fun" required size="50">
+    <button type="submit">Sign In</button>
+  </form>
+
+  <p>Notes: this page expects the plugin to be installed under <code>lib/plugins/oauthindie/</code>. When installed you can open this file at <code>/lib/plugins/oauthindie/examples/signin.html</code> and the form will POST to the plugin route <code>?oauthindie=start</code>.</p>
+</body>
+</html>
