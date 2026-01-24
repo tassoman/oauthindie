@@ -2,7 +2,6 @@ base   oauthindie
 author Tassoman
 email  tassoman@gmail.com
 date   2026-01-24
-name   oauthindie plugin
-desc   IndieAuth extension for oAuth plugin in Dokuwiki
-url    https://www.dokuwiki.org/plugin:oauthindie
-depends oauth
+name   oauth IndieAuth Service
+desc   IndieAuth Service for use with the oAuth Plugin
+url    http://www.dokuwiki.org/plugin:oauthindie
