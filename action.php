@@ -8,7 +8,7 @@
  */
 
 use dokuwiki\plugin\oauth\Adapter;
-use dokuwiki\plugin\oauthindie\DotAccess;
+use dokuwiki\plugin\oauthgeneric\DotAccess;
 use dokuwiki\plugin\oauthindie\Indie;
 
 /**
@@ -36,12 +36,13 @@ class action_plugin_oauthindie extends Adapter
         $result = json_decode($raw, true);
         if (!$result) throw new OAuthException('Failed to parse data from userurl');
 
+/*
         $grpdots = sexplode('[]', $this->getConf('json-grps'), 2);
         $user = DotAccess::get($result, $this->getConf('json-user'), '');
         $name = DotAccess::get($result, $this->getConf('json-name'), '');
         $mail = DotAccess::get($result, $this->getConf('json-mail'), '');
         $grps = DotAccess::get($result, $grpdots[0], []);
-
+*/
         // use dot notation on each group
         if (is_array($grps) && $grpdots[1]) {
             $grps = array_map(function ($grp) use ($grpdots) {
@@ -98,33 +99,9 @@ class action_plugin_oauthindie extends Adapter
         $redir = $helper->redirectURI();
         $url .= (strpos($url, '?') === false ? '?' : '&') . 'post_logout_redirect_uri=' . urlencode($redir);
 
-        // add state if needed (we don't check it, but some providers require it)
-        if ($this->getConf('needs-state')) {
-            $state = bin2hex(random_bytes(16));
-            $url .= (strpos($url, '?') === false ? '?' : '&') . 'state=' . urlencode($state);
-        }
-
         parent::logout();
         send_redirect($url);
         exit;
     }
-
-
-    /** @inheritdoc */
-    public function getScopes()
-    {
-        return $this->getConf('scopes');
-    }
-
-    /** @inheritDoc */
-    public function getLabel()
-    {
-        return $this->getConf('label');
-    }
-
-    /** @inheritDoc */
-    public function getColor()
-    {
-        return $this->getConf('color');
-    }
+    
 }

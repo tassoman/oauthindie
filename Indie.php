@@ -19,21 +19,21 @@ class Indie extends AbstractOAuth2Base
 {
     /** @inheritdoc */
     public function needsStateParameterInAuthUrl() {
-        $plugin = plugin_load('helper', 'oauthgeneric');
+        $plugin = plugin_load('helper', 'oauthindie');
         return 0 !== $plugin->getConf('needs-state');
     }
 
     /** @inheritdoc */
     public function getAuthorizationEndpoint()
     {
-        $plugin = plugin_load('helper', 'oauthgeneric');
+        $plugin = plugin_load('helper', 'oauthindie');
         return new Uri($plugin->getConf('authurl'));
     }
 
     /** @inheritdoc */
     public function getAccessTokenEndpoint()
     {
-        $plugin = plugin_load('helper', 'oauthgeneric');
+        $plugin = plugin_load('helper', 'oauthindie');
         return new Uri($plugin->getConf('tokenurl'));
     }
 
@@ -42,7 +42,7 @@ class Indie extends AbstractOAuth2Base
      */
     protected function getAuthorizationMethod()
     {
-        $plugin = plugin_load('helper', 'oauthgeneric');
+        $plugin = plugin_load('helper', 'oauthindie');
 
         return (int) $plugin->getConf('authmethod');
     }
