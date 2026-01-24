@@ -14,13 +14,13 @@ use dokuwiki\plugin\oauthindie\Indie;
 /**
  * Service Implementation for oAuth Doorkeeper authentication
  */
-class action_plugin_oauthgeneric extends Adapter
+class action_plugin_oauthindie extends Adapter
 {
 
     /** @inheritdoc */
     public function registerServiceClass()
     {
-        return Generic::class;
+        return Indie::class;
     }
 
     /** * @inheritDoc */
