@@ -17,7 +17,7 @@
 4. Account fields map to DokuWiki as follows:
    - Username: `@username@hostname` (`hostname` comes from API `host`, or the instance host for local accounts)
    - Real name: API `name`, falling back to `username`
-   - Email: API `email` when available; otherwise the synthetic username identifier (not a deliverable email)
+   - Email: verified API `email` when available; otherwise the synthetic username identifier (not a deliverable email)
    - Groups: API hostname, in addition to the OAuth plugin's `indie` service group
 
 ## Setup

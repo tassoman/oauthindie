@@ -111,9 +111,6 @@ class action_plugin_oauthindie extends Adapter
             }
         }
 
-        // Misskey returns access_token, token_type and scope, but no `me` property.
-        // Validate the callback issuer when available; the account endpoint below
-        // supplies the authenticated user's actual identity/profile.
         return parent::checkToken();
     }
 
@@ -129,19 +126,14 @@ class action_plugin_oauthindie extends Adapter
             $endpoint = 'https://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . '/api/i';
         }
 
-        // Misskey requires application/json here; form-encoded OAuth::request() gets HTTP 415.
         $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
         $http = new DokuHTTPClient();
         $http->keep_alive = false;
         $http->headers['Accept'] = 'application/json';
         $http->headers['Content-Type'] = 'application/json';
         $http->headers['Authorization'] = 'Bearer ' . $token->getAccessToken();
-
         if (!$http->sendRequest($endpoint, '{}', 'POST') || $http->status < 200 || $http->status >= 300) {
-            throw new OAuthException(
-                'Failed to fetch authenticated account profile: ' .
-                ($http->error ?: 'HTTP ' . $http->status)
-            );
+            throw new OAuthException('Failed to fetch authenticated account profile: ' . ($http->error ?: 'HTTP ' . $http->status));
         }
 
         $profile = json_decode($http->resp_body, true);
@@ -155,10 +147,10 @@ class action_plugin_oauthindie extends Adapter
         $host = strtolower(trim($host));
         if ($host === '') throw new OAuthException('Cannot determine account hostname from Misskey profile.');
 
-        // DokuWiki username must be @username@hostname; use a real API email when present,
-        // otherwise retain a synthetic identifier (Misskey remote profiles commonly omit email).
+        // DokuWiki usernames may not start with @, so use the canonical fediverse form.
         $user = '@' . ltrim($username, '@') . '@' . $host;
-        $mail = trim((string)($profile['email'] ?? ''));
+        // Only use a real email if Misskey reports it as verified; remote accounts commonly omit it.
+        $mail = !empty($profile['emailVerified']) ? trim((string)($profile['email'] ?? '')) : '';
         if ($mail === '') $mail = $user;
         $name = trim((string)($profile['name'] ?? '')) ?: $username;
         $grps = [$host];
