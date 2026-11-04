@@ -8,100 +8,131 @@
  */
 
 use dokuwiki\plugin\oauth\Adapter;
-use dokuwiki\plugin\oauthgeneric\DotAccess;
 use dokuwiki\plugin\oauthindie\Indie;
+use OAuth\Common\Exception\Exception as OAuthException;
 
-/**
- * Service Implementation for oAuth Doorkeeper authentication
- */
+/** IndieAuth login provider adapter for the DokuWiki OAuth plugin. */
 class action_plugin_oauthindie extends Adapter
 {
-
-    /** @inheritdoc */
+    /** Register the IndieAuth OAuth2 service implementation. */
     public function registerServiceClass()
     {
         return Indie::class;
     }
 
-    /** * @inheritDoc */
-    public function getUser()
+    /** IndieAuth providers do not have a preconfigured client secret. */
+    public function getKey()
     {
-        $oauth = $this->getOAuthService();
-        $data = array();
-
-        $url = $this->getConf('userurl');
-        $raw = $oauth->request($url);
-
-        if (!$raw) throw new OAuthException('Failed to fetch data from userurl');
-        $result = json_decode($raw, true);
-        if (!$result) throw new OAuthException('Failed to parse data from userurl');
-
-/*
-        $grpdots = sexplode('[]', $this->getConf('json-grps'), 2);
-        $user = DotAccess::get($result, $this->getConf('json-user'), '');
-        $name = DotAccess::get($result, $this->getConf('json-name'), '');
-        $mail = DotAccess::get($result, $this->getConf('json-mail'), '');
-        $grps = DotAccess::get($result, $grpdots[0], []);
-*/
-        // use dot notation on each group
-        if (is_array($grps) && $grpdots[1]) {
-            $grps = array_map(function ($grp) use ($grpdots) {
-                return DotAccess::get($grp, $grpdots[1], '');
-            }, $grps);
-        }
-
-        // type fixes
-        if (is_array($user)) $user = array_shift($user);
-        if (is_array($name)) $name = array_shift($name);
-        if (is_array($mail)) $mail = array_shift($mail);
-        if (!is_array($grps)) {
-            $grps = explode(',', $grps);
-            $grps = array_map('trim', $grps);
-        }
-
-        // fallbacks for user name
-        if (empty($user)) {
-            if (!empty($name)) {
-                $user = $name;
-            } elseif (!empty($mail)) {
-                list($user) = explode('@', $mail);
-            }
-        }
-
-        // fallback for full name
-        if (empty($name)) {
-            $name = $user;
-        }
-
-        return compact('user', 'name', 'mail', 'grps');
+        return rtrim(DOKU_URL, '/') . '/';
     }
 
-    /** @inheritdoc */
-    public function logout()
+    /** IndieAuth public clients use their site URL as client_id. */
+    public function getSecret()
     {
-        $url = $this->getConf('logouturl');
-        if (!$url) {
-            parent::logout();
-            return;
+        return '';
+    }
+
+    /**
+     * Render an identity URL field and submit button in DokuWiki's OAuth login form.
+     * The OAuth plugin's normal oauthlogin route handles the POST and starts this adapter.
+     */
+    public function loginButton()
+    {
+        global $ID;
+        $action = wl($ID, ['oauthlogin' => $this->getServiceID()], false, '&');
+        $label = hsc($this->getLabel());
+        $placeholder = hsc($this->getLang('identityplaceholder'));
+        $identityLabel = hsc($this->getLang('identitylabel'));
+        $submit = hsc($this->getLang('loginbutton'));
+
+        return '<form method="post" action="' . hsc($action) . '" class="plugin_oauthindie_login">' .
+            '<label for="oauthindie-me">' . $identityLabel . '</label> ' .
+            '<input id="oauthindie-me" type="url" name="me" required autocomplete="url" ' .
+                'placeholder="' . $placeholder . '" aria-label="' . $identityLabel . '" /> ' .
+            '<button type="submit" style="background-color:' . hsc($this->getColor()) . '">' . $submit . '</button>' .
+            '</form>';
+    }
+
+    /**
+     * Resolve identity and endpoints, then start the standard IndieAuth code flow.
+     * Called by the OAuth plugin after initializing the service object.
+     */
+    public function login()
+    {
+        global $INPUT;
+        $helper = plugin_load('helper', 'oauthindie');
+        $me = $helper->normalizeIdentity($INPUT->post->str('me', ''));
+        $endpoints = $helper->discoverEndpoints($me);
+
+        // The OAuth manager creates the service before calling this method. The service
+        // reads these per-login endpoints from the DokuWiki session during URL creation
+        // and again when the provider redirects back.
+        $_SESSION[DOKU_COOKIE]['auth']['oauthindie'] = [
+            'me' => $me,
+            'authorization_endpoint' => $endpoints['authorization_endpoint'],
+            'token_endpoint' => $endpoints['token_endpoint'],
+        ];
+
+        $verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $_SESSION[DOKU_COOKIE]['auth']['oauthindie']['code_verifier'] = $verifier;
+
+        $oauth = $this->getOAuthService();
+        $url = $oauth->getAuthorizationUri([
+            'me' => $me,
+            'code_challenge' => $challenge,
+            'code_challenge_method' => 'S256',
+        ]);
+        send_redirect((string)$url);
+    }
+
+    /** Exchange callback code with the IndieAuth token endpoint and validate its me value. */
+    public function checkToken()
+    {
+        global $INPUT;
+        if (!$INPUT->get->has('code')) return false;
+
+        $data = $_SESSION[DOKU_COOKIE]['auth']['oauthindie'] ?? [];
+        if (empty($data['me']) || empty($data['code_verifier'])) {
+            throw new OAuthException('IndieAuth login session has expired. Please try again.');
         }
 
-        // add ID token if available
-        $oauth = $this->getOAuthService();
-        $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
+        $ok = parent::checkToken();
+        if (!$ok) return false;
+
+        $token = $this->getOAuthService()->getStorage()->retrieveAccessToken($this->getOAuthService()->service());
         $params = $token->getExtraParams();
-        if (isset($params['id_token'])) {
-            $url .= (strpos($url, '?') === false ? '?' : '&') . 'id_token_hint=' . urlencode($params['id_token']);
+        if (empty($params['me']) || $this->canonicalIdentity($params['me']) !== $this->canonicalIdentity($data['me'])) {
+            throw new OAuthException('IndieAuth token response did not confirm the requested identity.');
         }
-
-        // redirect back to dokuwiki after logout
-        /** @var helper_plugin_oauth $helper */
-        $helper = plugin_load('helper', 'oauth');
-        $redir = $helper->redirectURI();
-        $url .= (strpos($url, '?') === false ? '?' : '&') . 'post_logout_redirect_uri=' . urlencode($redir);
-
-        parent::logout();
-        send_redirect($url);
-        exit;
+        return true;
     }
-    
+
+    /** IndieAuth clients can request scopes configured by the administrator. */
+    public function getScopes()
+    {
+        $scopes = trim((string)$this->getConf('scopes'));
+        return $scopes === '' ? [] : preg_split('/\s+/', $scopes);
+    }
+
+    public function getLabel()
+    {
+        return $this->getConf('label') ?: 'IndieAuth';
+    }
+
+    public function getColor()
+    {
+        return $this->getConf('color') ?: '#333333';
+    }
+
+    /** Canonical URL comparison without changing path or query identity components. */
+    private function canonicalIdentity($url)
+    {
+        $parts = parse_url((string)$url);
+        if (!$parts || empty($parts['host'])) return '';
+        $scheme = strtolower($parts['scheme'] ?? 'https');
+        $host = strtolower($parts['host']);
+        $port = isset($parts['port']) && !in_array($parts['port'], [80, 443], true) ? ':' . $parts['port'] : '';
+        return $scheme . '://' . $host . $port . ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
+    }
 }

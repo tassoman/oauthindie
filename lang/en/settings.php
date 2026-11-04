@@ -1,9 +1,16 @@
 <?php
 /**
- * english language file for oauthgeneric plugin
- *
- * @author Andreas Gohr <dokuwiki@cosmocode.de>
+ * English language file for the oauthindie plugin.
  */
-
-$lang['label'] = 'Label to display on the login button';
-$lang['color'] = 'Color to use with the login button';
+$lang['label'] = 'Login with IndieAuth';
+$lang['color'] = 'Color of the login button';
+$lang['scopes'] = 'Scopes to request (space-separated; leave empty to request none)';
+$lang['identitylabel'] = 'Your website or IndieAuth identity URL';
+$lang['identityplaceholder'] = 'https://example.com/';
+$lang['identityrequired'] = 'Enter your website URL to continue.';
+$lang['identityinvalid'] = 'Enter a valid website URL with a hostname.';
+$lang['privatehost'] = 'This identity URL resolves to a private or reserved network address and cannot be used.';
+$lang['discoveryfailed'] = 'Could not retrieve the identity page (HTTP status %d).';
+$lang['noauthorizationendpoint'] = 'No IndieAuth authorization_endpoint was found on this identity page.';
+$lang['endpointmustbehttps'] = 'Discovered IndieAuth endpoints must use HTTPS.';
+$lang['loginbutton'] = 'Continue with IndieAuth';
