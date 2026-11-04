@@ -1,38 +1,27 @@
 # oauthindie — IndieAuth client for DokuWiki
 
-`oauthindie` adds an IndieAuth identity URL login to DokuWiki's [`oauth` plugin](https://www.dokuwiki.org/plugin:oauth). It acts as a **client**: the person enters their own website or fediverse identity URL, and DokuWiki discovers that site's IndieAuth authorization endpoint and redirects the person there to authenticate.
+`oauthindie` adds an IndieAuth identity login to DokuWiki's `oauth` authentication plugin. Users enter their website or Misskey instance hostname. The plugin discovers server endpoints, performs the IndieAuth authorization-code flow with PKCE S256, then fetches the authenticated Misskey account.
 
-This plugin is not an IndieAuth authorization server. It does not host an authorization or token endpoint.
+## Endpoint and client discovery
 
-## Login flow
+- For Misskey, the plugin first fetches `https://<instance>/.well-known/oauth-authorization-server` and reads `authorization_endpoint` and `token_endpoint` from the JSON metadata. This is server endpoint discovery; it is separate from client metadata discovery.
+- If server metadata is unavailable, the plugin falls back to IndieAuth `authorization_endpoint` and `token_endpoint` links in the identity page's HTML or HTTP `Link` headers.
+- Misskey also discovers the DokuWiki client at the `client_id` URL. The OAuth adapter adds `<link rel="redirect_uri" href="...">` to DokuWiki's page head, using the OAuth plugin's configured `redirectURI()` (normally `DOKU_URL . DOKU_SCRIPT`). The advertised URI must exactly match the `redirect_uri` in the authorization request. This follows the HTML client discovery path supported by Misskey; Misskey v2026.3.0+ also supports JSON client metadata served from the client ID URL.
 
-1. On the DokuWiki login form, enter an identity URL such as `https://example.com/` (a hostname without a scheme is also accepted and treated as HTTPS).
-2. The plugin checks the URL and retrieves the identity page.
-3. It discovers `authorization_endpoint` (required) and `token_endpoint` (required for exchange) from HTML `<link rel="...">` elements and HTTP `Link` headers.
-4. It starts the IndieAuth authorization-code flow with `me`, DokuWiki's client ID and redirect URI, a random `state`, and a PKCE S256 challenge.
-5. On callback, it exchanges the code using the stored PKCE verifier and checks that the token response's `me` matches the identity submitted at login.
-6. For Misskey-compatible IndieAuth providers, the plugin requests the authenticated account from `POST /api/i` with the granted access token.
-7. It maps the returned account to DokuWiki fields: `username@host` becomes both the account identifier and email, and the account's `name` is used as the display name. For local accounts where Misskey returns a null `host`, the host from the API endpoint is used.
+## Login and account mapping
 
-Discovery endpoints and identity URLs must use publicly routable hosts; discovered endpoints must use HTTPS. Discovery does not follow redirects. This avoids turning a user-provided identity URL into an unrestricted server-side fetch. A redirecting homepage should be replaced with its final canonical URL.
+1. Enter a hostname such as `misskey.example` or a full identity URL. Hostnames are normalized to HTTPS.
+2. The plugin requests the `read:account` scope by default and includes a random state value and PKCE S256 challenge.
+3. On callback, it exchanges the code with the PKCE verifier and verifies the returned `me` identity.
+4. It calls Misskey's authenticated account API (`POST /api/i`). The account's `username` and `host` become the DokuWiki login identifier and synthetic email (`username@host`); the account `name` becomes the display name. If `host` is null for a local account, the instance host is used. The synthetic address is an identifier, not a deliverable email.
 
-## Requirements and setup
+Endpoint discovery only accepts public HTTPS URLs and does not follow redirects. Discovery requests to a user-provided hostname are server-side, so private and reserved addresses are rejected.
 
-- Install this plugin in `lib/plugins/oauthindie/`.
-- Install and enable DokuWiki's `oauth` plugin and configure it as the authentication backend.
-- Ensure DokuWiki's canonical URL is correct and HTTPS. The plugin uses the DokuWiki site URL as the IndieAuth `client_id` and the OAuth plugin's configured callback URL as `redirect_uri`.
-- The client ID URL must advertise this exact redirect URI in its client metadata, as required by the IndieAuth provider. Add a `<link rel="redirect_uri" href="YOUR_DOKUWIKI_OAUTH_CALLBACK_URL">` to the client ID page, or serve compatible IndieAuth client metadata from that URL.
-- The default requested scope is `read:account`, used by Misskey to authorize access to the signed-in account. Configure scopes as a space-separated list if needed.
-- The profile endpoint defaults to `/api/i` on the host of the discovered token endpoint. Set the optional `profileurl` setting if the provider exposes the account endpoint at another URL.
+## Setup
 
-## Account mapping and limitations
+- Install under `lib/plugins/oauthindie/`.
+- Install and enable DokuWiki's `oauth` plugin as the authentication backend.
+- Ensure DokuWiki's canonical site URL and OAuth plugin redirect URI are correct and accessible over HTTPS.
+- The DokuWiki page at the configured client ID URL must expose the exact callback `redirect_uri`; the plugin adds a `rel="redirect_uri"` link to the page head dynamically.
 
-IndieAuth defines identity and authorization, not a universal profile API. This plugin's current profile implementation targets Misskey-compatible IndieAuth providers and the Misskey account object fields `username`, `host`, and `name`. For another provider, configure a compatible profile endpoint or add provider-specific response mapping. Misskey does not provide an email address by default; the plugin synthesizes the DokuWiki email as `username@host` as requested for this fediverse login use case. This is an identifier for DokuWiki and should not be treated as a deliverable email address.
-
-See [Aaron Parecki's IndieAuth implementation tutorial](https://aaronparecki.com/2021/04/13/26/indieauth), the [IndieAuth specification](https://indieauth.spec.indieweb.org/), and [Misskey OAuth documentation](https://misskey-hub.net/en/docs/for-developers/api/token/oauth/) for protocol details.
-
-----
-
-Copyright (C) Tassoman <tassoman@gmail.com>
-
-This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; version 2 of the License.
+See the [Misskey OAuth documentation](https://misskey-hub.net/en/docs/for-developers/api/token/oauth/), [Misskey PR #17030](https://github.com/misskey-dev/misskey/pull/17030), and the [IndieAuth specification](https://indieauth.spec.indieweb.org/).
