@@ -1,51 +1,64 @@
 <?php
 /**
- * Map a Misskey account returned by its IndieAuth provider to DokuWiki user data.
+ * IndieAuth provider adapter for the DokuWiki OAuth plugin.
+ *
+ * Keep the adapter focused on DokuWiki form integration and converting provider
+ * profile data to the user structure expected by the OAuth plugin. The Indie.php
+ * service owns protocol-specific endpoint and token behavior.
  */
 
 use dokuwiki\plugin\oauth\Adapter;
 use dokuwiki\plugin\oauthindie\Indie;
 use OAuth\Common\Exception\Exception as OAuthException;
 
-/** IndieAuth login provider adapter for the DokuWiki OAuth plugin. */
 class action_plugin_oauthindie extends Adapter
 {
-    /** Register the IndieAuth OAuth2 service implementation. */
+    /** @inheritDoc */
     public function registerServiceClass()
     {
         return Indie::class;
     }
 
-    /** IndieAuth providers do not have a preconfigured client secret. */
+    /**
+     * IndieAuth's client_id is the DokuWiki site's canonical URL. An empty key
+     * prevents the OAuth plugin from hiding this dynamically configured service.
+     *
+     * @return string
+     */
     public function getKey()
     {
         return rtrim(DOKU_URL, '/') . '/';
     }
 
-    /** IndieAuth public clients use their site URL as client_id. */
+    /** @inheritDoc */
     public function getSecret()
     {
         return '';
     }
 
-    /** Render an identity URL field and submit button in DokuWiki's OAuth login form. */
+    /**
+     * The OAuth plugin places service controls inside its own login form. Render
+     * just the fields and submit button here; a nested form is invalid HTML and
+     * browsers can discard its controls. Posting the service name starts the
+     * OAuth plugin's normal login flow while preserving the submitted identity.
+     *
+     * @return string
+     */
     public function loginButton()
     {
-        global $ID;
-        $action = wl($ID, ['oauthlogin' => $this->getServiceID()], false, '&');
-        $placeholder = hsc($this->getLang('identityplaceholder'));
-        $identityLabel = hsc($this->getLang('identitylabel'));
-        $submit = hsc($this->getLang('loginbutton'));
-
-        return '<form method="post" action="' . hsc($action) . '" class="plugin_oauthindie_login">' .
-            '<label for="oauthindie-me">' . $identityLabel . '</label> ' .
-            '<input id="oauthindie-me" type="url" name="me" required autocomplete="url" ' .
-                'placeholder="' . $placeholder . '" aria-label="' . $identityLabel . '" /> ' .
-            '<button type="submit" style="background-color:' . hsc($this->getColor()) . '">' . $submit . '</button>' .
-            '</form>';
+        return '<div class="plugin_oauthindie_login">' .
+            '<label for="oauthindie-me">' . hsc($this->getLang('identitylabel')) . '</label> ' .
+            '<input id="oauthindie-me" type="text" name="me" required autocomplete="url" ' .
+                'placeholder="' . hsc($this->getLang('identityplaceholder')) . '" ' .
+                'pattern="[A-Za-z0-9.-]+(:[0-9]+)?(/[^ ]*)?" ' .
+                'title="' . hsc($this->getLang('identityinvalid')) . '" /> ' .
+            '<button type="submit" name="oauthlogin" value="' . hsc($this->getServiceID()) . '" ' .
+                'style="background-color:' . hsc($this->getColor()) . '">' .
+                hsc($this->getLang('loginbutton')) .
+            '</button></div>';
     }
 
-    /** Discover the user's IndieAuth server and begin authorization. */
+    /** Start discovery and authorization after the OAuth plugin's login form submits. */
     public function login()
     {
         global $INPUT;
@@ -71,7 +84,7 @@ class action_plugin_oauthindie extends Adapter
         send_redirect((string)$url);
     }
 
-    /** Exchange callback code and ensure the provider returned the requested identity. */
+    /** Exchange callback code and verify that the provider authenticated this identity. */
     public function checkToken()
     {
         global $INPUT;
@@ -81,8 +94,8 @@ class action_plugin_oauthindie extends Adapter
         if (empty($login['me']) || empty($login['code_verifier'])) {
             throw new OAuthException('IndieAuth login session has expired. Please try again.');
         }
-
         if (!parent::checkToken()) return false;
+
         $oauth = $this->getOAuthService();
         $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
         $params = $token->getExtraParams();
@@ -93,10 +106,9 @@ class action_plugin_oauthindie extends Adapter
     }
 
     /**
-     * Fetch the authenticated Misskey account using the access token.
-     * Misskey exposes the current account at POST /api/i and returns `username`, `host`, and `name`.
-     * The email is a stable federated login identifier, username@host; local accounts use the
-     * instance hostname from the discovered token endpoint when the API host field is null.
+     * Fetch the authenticated Misskey account and map it to DokuWiki user fields.
+     *
+     * @return array{user:string,name:string,mail:string,grps:array}
      */
     public function getUser()
     {
@@ -124,31 +136,30 @@ class action_plugin_oauthindie extends Adapter
 
         $username = trim((string)$profile['username']);
         $host = trim((string)($profile['host'] ?? ''));
-        if ($host === '') {
-            $host = (string)parse_url($endpoint, PHP_URL_HOST);
-        }
+        if ($host === '') $host = (string)parse_url($endpoint, PHP_URL_HOST);
         if ($host === '') throw new OAuthException('Cannot determine account hostname from Misskey profile.');
 
-        $mail = $username . '@' . strtolower($host);
-        $name = trim((string)($profile['name'] ?? ''));
-        if ($name === '') $name = $username;
         $user = $username . '@' . strtolower($host);
+        $mail = $user; // Misskey does not provide a deliverable email; this is the fediverse login identifier.
+        $name = trim((string)($profile['name'] ?? '')) ?: $username;
         $grps = [];
-
         return compact('user', 'name', 'mail', 'grps');
     }
 
+    /** @inheritDoc */
     public function getScopes()
     {
         $scopes = trim((string)$this->getConf('scopes'));
         return $scopes === '' ? ['read:account'] : preg_split('/\s+/', $scopes);
     }
 
+    /** @inheritDoc */
     public function getLabel()
     {
         return $this->getConf('label') ?: 'IndieAuth';
     }
 
+    /** @inheritDoc */
     public function getColor()
     {
         return $this->getConf('color') ?: '#333333';
