@@ -7,12 +7,51 @@
  * service owns protocol-specific endpoint and token behavior.
  */
 
+use dokuwiki\Extension\Event;
+use dokuwiki\Extension\EventHandler;
 use dokuwiki\plugin\oauth\Adapter;
 use dokuwiki\plugin\oauthindie\Indie;
 use OAuth\Common\Exception\Exception as OAuthException;
 
 class action_plugin_oauthindie extends Adapter
 {
+    /**
+     * Register this service with OAuth and advertise the configured callback URL
+     * to IndieAuth clients such as Misskey.
+     *
+     * @inheritDoc
+     */
+    public function register(EventHandler $controller)
+    {
+        parent::register($controller);
+        $controller->register_hook('TPL_METAHEADER_OUTPUT', 'BEFORE', $this, 'handleMetaHeader');
+    }
+
+    /** Add the OAuth plugin's actual redirect URI as a discovery link in <head>. */
+    public function handleMetaHeader(Event &$event, $param)
+    {
+        /** @var helper_plugin_oauth $oauthHelper */
+        $oauthHelper = plugin_load('helper', 'oauth');
+        if (!$oauthHelper) return;
+
+        $redirectUri = $oauthHelper->redirectURI();
+        if (!isset($event->data['link']) || !is_array($event->data['link'])) {
+            $event->data['link'] = [];
+        }
+
+        // Avoid duplicate redirect_uri links if another component already added it.
+        foreach ($event->data['link'] as $link) {
+            if (($link['rel'] ?? '') === 'redirect_uri' && ($link['href'] ?? '') === $redirectUri) {
+                return;
+            }
+        }
+
+        $event->data['link'][] = [
+            'rel' => 'redirect_uri',
+            'href' => $redirectUri,
+        ];
+    }
+
     /** @inheritDoc */
     public function registerServiceClass()
     {
