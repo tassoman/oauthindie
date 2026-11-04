@@ -1,10 +1,11 @@
 <?php
 /**
- * Plugin settings for oauthindie.
+ * Italian language file for the oauthindie plugin.
  */
-$lang['label'] = 'Nome da visualizzare nel pulsante di accesso';
+$lang['label'] = 'Accedi con IndieAuth';
 $lang['color'] = 'Colore del pulsante di accesso';
-$lang['scopes'] = 'Scope da richiedere (separati da spazi; lasciare vuoto per non richiederne)';
+$lang['scopes'] = 'Scope da richiedere (separati da spazi; predefinito: read:account)';
+$lang['profileurl'] = 'Endpoint del profilo autenticato (opzionale; predefinito: Misskey /api/i)';
 $lang['identitylabel'] = 'Il tuo sito o URL di identità IndieAuth';
 $lang['identityplaceholder'] = 'https://example.com/';
 $lang['identityrequired'] = 'Inserisci l’URL del tuo sito per continuare.';

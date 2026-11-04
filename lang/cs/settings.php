@@ -2,9 +2,10 @@
 /**
  * Czech language file for the oauthindie plugin.
  */
-$lang['label'] = 'Popisek přihlašovacího tlačítka';
+$lang['label'] = 'Přihlásit přes IndieAuth';
 $lang['color'] = 'Barva přihlašovacího tlačítka';
-$lang['scopes'] = 'Požadované scopes (oddělené mezerami; ponechte prázdné, pokud žádné nechcete)';
+$lang['scopes'] = 'Požadované scopes (oddělené mezerami; výchozí: read:account)';
+$lang['profileurl'] = 'Endpoint profilu přihlášeného účtu (volitelný; výchozí: Misskey /api/i)';
 $lang['identitylabel'] = 'Váš web nebo URL IndieAuth identity';
 $lang['identityplaceholder'] = 'https://example.com/';
 $lang['identityrequired'] = 'Pro pokračování zadejte URL svého webu.';

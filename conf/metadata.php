@@ -4,5 +4,6 @@
  */
 
 $meta['scopes'] = array('string');
+$meta['profileurl'] = array('string');
 $meta['label'] = array('string');
 $meta['color'] = array('string');
