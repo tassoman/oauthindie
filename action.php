@@ -8,6 +8,7 @@
 
 use dokuwiki\Extension\Event;
 use dokuwiki\Extension\EventHandler;
+use dokuwiki\HTTP\DokuHTTPClient;
 use dokuwiki\plugin\oauth\Adapter;
 use dokuwiki\plugin\oauthindie\Indie;
 use OAuth\Common\Exception\Exception as OAuthException;
@@ -110,9 +111,9 @@ class action_plugin_oauthindie extends Adapter
             }
         }
 
-        // Misskey's token response has access_token, token_type and scope but does not
-        // include IndieAuth's optional `me` property. The callback issuer plus successful
-        // PKCE token exchange is the applicable server validation for Misskey.
+        // Misskey returns access_token, token_type and scope, but no `me` property.
+        // Validate the callback issuer when available; the account endpoint below
+        // supplies the authenticated user's actual identity/profile.
         return parent::checkToken();
     }
 
@@ -128,12 +129,24 @@ class action_plugin_oauthindie extends Adapter
             $endpoint = 'https://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . '/api/i';
         }
 
-        try {
-            $raw = $oauth->request($endpoint, 'POST', []);
-        } catch (Exception $e) {
-            throw new OAuthException('Failed to fetch authenticated account profile: ' . $e->getMessage());
+        // Misskey's API expects application/json. OAuth::request() serializes an array
+        // as application/x-www-form-urlencoded, which Misskey rejects with HTTP 415.
+        // Send an empty JSON object and authenticate with the access token as Bearer.
+        $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
+        $http = new DokuHTTPClient();
+        $http->keep_alive = false;
+        $http->headers['Accept'] = 'application/json';
+        $http->headers['Content-Type'] = 'application/json';
+        $http->headers['Authorization'] = 'Bearer ' . $token->getAccessToken();
+
+        if (!$http->sendRequest($endpoint, '{}', 'POST') || $http->status < 200 || $http->status >= 300) {
+            throw new OAuthException(
+                'Failed to fetch authenticated account profile: ' .
+                ($http->error ?: 'HTTP ' . $http->status)
+            );
         }
-        $profile = json_decode($raw, true);
+
+        $profile = json_decode($http->resp_body, true);
         if (!is_array($profile) || empty($profile['username'])) {
             throw new OAuthException('Misskey profile response is missing the username field.');
         }
