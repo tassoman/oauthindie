@@ -21,14 +21,14 @@ class action_plugin_oauthindie extends Adapter
         $controller->register_hook('TPL_METAHEADER_OUTPUT', 'BEFORE', $this, 'handleMetaHeader');
     }
 
-    /** Add the configured OAuth callback URI as an IndieAuth redirect_uri link. */
+    /** Advertise the configured OAuth callback URI as an IndieAuth redirect URI. */
     public function handleMetaHeader(Event &$event, $param)
     {
         /** @var helper_plugin_oauth $oauthHelper */
         $oauthHelper = plugin_load('helper', 'oauth');
         if (!$oauthHelper) return;
-        $redirectUri = $oauthHelper->redirectURI();
 
+        $redirectUri = $oauthHelper->redirectURI();
         if (!isset($event->data['link']) || !is_array($event->data['link'])) $event->data['link'] = [];
         foreach ($event->data['link'] as $link) {
             if (($link['rel'] ?? '') === 'redirect_uri' && ($link['href'] ?? '') === $redirectUri) return;
@@ -117,7 +117,7 @@ class action_plugin_oauthindie extends Adapter
         return parent::checkToken();
     }
 
-    /** Extract current Misskey account and map it to DokuWiki user fields. */
+    /** Fetch the authenticated Misskey account and map it to DokuWiki user fields. */
     public function getUser()
     {
         $oauth = $this->getOAuthService();
@@ -129,9 +129,7 @@ class action_plugin_oauthindie extends Adapter
             $endpoint = 'https://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . '/api/i';
         }
 
-        // Misskey's API expects application/json. OAuth::request() serializes an array
-        // as application/x-www-form-urlencoded, which Misskey rejects with HTTP 415.
-        // Send an empty JSON object and authenticate with the access token as Bearer.
+        // Misskey requires application/json here; form-encoded OAuth::request() gets HTTP 415.
         $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
         $http = new DokuHTTPClient();
         $http->keep_alive = false;
@@ -154,12 +152,16 @@ class action_plugin_oauthindie extends Adapter
         $username = trim((string)$profile['username']);
         $host = trim((string)($profile['host'] ?? ''));
         if ($host === '') $host = (string)parse_url($endpoint, PHP_URL_HOST);
+        $host = strtolower(trim($host));
         if ($host === '') throw new OAuthException('Cannot determine account hostname from Misskey profile.');
 
-        $user = $username . '@' . strtolower($host);
-        $mail = $user; // Synthetic federated identifier; not a deliverable email address.
+        // DokuWiki username must be @username@hostname; use a real API email when present,
+        // otherwise retain a synthetic identifier (Misskey remote profiles commonly omit email).
+        $user = '@' . ltrim($username, '@') . '@' . $host;
+        $mail = trim((string)($profile['email'] ?? ''));
+        if ($mail === '') $mail = $user;
         $name = trim((string)($profile['name'] ?? '')) ?: $username;
-        $grps = [];
+        $grps = [$host];
         return compact('user', 'name', 'mail', 'grps');
     }
 
@@ -179,7 +181,6 @@ class action_plugin_oauthindie extends Adapter
         return $this->getConf('color') ?: '#333333';
     }
 
-    /** Normalize issuer URL for RFC 9207 comparison. */
     private function canonicalIssuer($issuer)
     {
         $parts = parse_url((string)$issuer);
