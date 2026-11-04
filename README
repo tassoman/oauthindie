@@ -4,16 +4,17 @@
 
 ## Endpoint and client discovery
 
-- For Misskey, the plugin first fetches `https://<instance>/.well-known/oauth-authorization-server` and reads `authorization_endpoint` and `token_endpoint` from the JSON metadata. This is server endpoint discovery; it is separate from client metadata discovery.
+- For Misskey, the plugin first fetches `https://<instance>/.well-known/oauth-authorization-server` and reads `authorization_endpoint`, `token_endpoint`, and `issuer` from the JSON metadata. This is server endpoint discovery; it is separate from client metadata discovery.
 - If server metadata is unavailable, the plugin falls back to IndieAuth `authorization_endpoint` and `token_endpoint` links in the identity page's HTML or HTTP `Link` headers.
 - Misskey also discovers the DokuWiki client at the `client_id` URL. The OAuth adapter adds `<link rel="redirect_uri" href="...">` to DokuWiki's page head, using the OAuth plugin's configured `redirectURI()` (normally `DOKU_URL . DOKU_SCRIPT`). The advertised URI must exactly match the `redirect_uri` in the authorization request. This follows the HTML client discovery path supported by Misskey; Misskey v2026.3.0+ also supports JSON client metadata served from the client ID URL.
+- Misskey's token response currently contains `access_token`, `token_type`, and `scope`, but does not return IndieAuth's optional `me`. The adapter therefore verifies a callback `iss` value against the discovered server issuer when Misskey supplies one, then obtains the authenticated identity using the account API.
 
 ## Login and account mapping
 
 1. Enter a hostname such as `misskey.example` or a full identity URL. Hostnames are normalized to HTTPS.
 2. The plugin requests the `read:account` scope by default and includes a random state value and PKCE S256 challenge.
-3. On callback, it exchanges the code with the PKCE verifier and verifies the returned `me` identity.
-4. It calls Misskey's authenticated account API (`POST /api/i`). The account's `username` and `host` become the DokuWiki login identifier and synthetic email (`username@host`); the account `name` becomes the display name. If `host` is null for a local account, the instance host is used. The synthetic address is an identifier, not a deliverable email.
+3. On callback, it validates the optional RFC 9207 `iss` response parameter, exchanges the code with the PKCE verifier, then calls Misskey's authenticated account API (`POST /api/i`).
+4. The account's `username` and `host` become the DokuWiki login identifier and synthetic email (`username@host`); the account `name` becomes the display name. If `host` is null for a local account, the instance host is used. The synthetic address is an identifier, not a deliverable email.
 
 Endpoint discovery only accepts public HTTPS URLs and does not follow redirects. Discovery requests to a user-provided hostname are server-side, so private and reserved addresses are rejected.
 

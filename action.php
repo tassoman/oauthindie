@@ -1,10 +1,9 @@
 <?php
 /**
- * IndieAuth provider adapter for the DokuWiki OAuth plugin.
+ * DokuWiki Plugin oauthindie (Action Component)
  *
- * Keep the adapter focused on DokuWiki form integration and converting provider
- * profile data to the user structure expected by the OAuth plugin. The Indie.php
- * service owns protocol-specific endpoint and token behavior.
+ * @license GPL 3 http://www.gnu.org/licenses/gpl-3.0.html
+ * @author Tassoman <tassoman@gmail.com>
  */
 
 use dokuwiki\Extension\Event;
@@ -15,74 +14,44 @@ use OAuth\Common\Exception\Exception as OAuthException;
 
 class action_plugin_oauthindie extends Adapter
 {
-    /**
-     * Register this service with OAuth and advertise the configured callback URL
-     * to IndieAuth clients such as Misskey.
-     *
-     * @inheritDoc
-     */
     public function register(EventHandler $controller)
     {
         parent::register($controller);
         $controller->register_hook('TPL_METAHEADER_OUTPUT', 'BEFORE', $this, 'handleMetaHeader');
     }
 
-    /** Add the OAuth plugin's actual redirect URI as a discovery link in <head>. */
+    /** Add the configured OAuth callback URI as an IndieAuth redirect_uri link. */
     public function handleMetaHeader(Event &$event, $param)
     {
         /** @var helper_plugin_oauth $oauthHelper */
         $oauthHelper = plugin_load('helper', 'oauth');
         if (!$oauthHelper) return;
-
         $redirectUri = $oauthHelper->redirectURI();
-        if (!isset($event->data['link']) || !is_array($event->data['link'])) {
-            $event->data['link'] = [];
-        }
 
-        // Avoid duplicate redirect_uri links if another component already added it.
+        if (!isset($event->data['link']) || !is_array($event->data['link'])) $event->data['link'] = [];
         foreach ($event->data['link'] as $link) {
-            if (($link['rel'] ?? '') === 'redirect_uri' && ($link['href'] ?? '') === $redirectUri) {
-                return;
-            }
+            if (($link['rel'] ?? '') === 'redirect_uri' && ($link['href'] ?? '') === $redirectUri) return;
         }
-
-        $event->data['link'][] = [
-            'rel' => 'redirect_uri',
-            'href' => $redirectUri,
-        ];
+        $event->data['link'][] = ['rel' => 'redirect_uri', 'href' => $redirectUri];
     }
 
-    /** @inheritDoc */
     public function registerServiceClass()
     {
         return Indie::class;
     }
 
-    /**
-     * IndieAuth's client_id is the DokuWiki site's canonical URL. An empty key
-     * prevents the OAuth plugin from hiding this dynamically configured service.
-     *
-     * @return string
-     */
+    /** IndieAuth client ID is the canonical DokuWiki URL. */
     public function getKey()
     {
         return rtrim(DOKU_URL, '/') . '/';
     }
 
-    /** @inheritDoc */
     public function getSecret()
     {
         return '';
     }
 
-    /**
-     * The OAuth plugin places service controls inside its own login form. Render
-     * just the fields and submit button here; a nested form is invalid HTML and
-     * browsers can discard its controls. Posting the service name starts the
-     * OAuth plugin's normal login flow while preserving the submitted identity.
-     *
-     * @return string
-     */
+    /** Render identity controls inside the OAuth plugin's existing login form. */
     public function loginButton()
     {
         return '<div class="plugin_oauthindie_login">' .
@@ -93,11 +62,10 @@ class action_plugin_oauthindie extends Adapter
                 'title="' . hsc($this->getLang('identityinvalid')) . '" /> ' .
             '<button type="submit" name="oauthlogin" value="' . hsc($this->getServiceID()) . '" ' .
                 'style="background-color:' . hsc($this->getColor()) . '">' .
-                hsc($this->getLang('loginbutton')) .
-            '</button></div>';
+                hsc($this->getLang('loginbutton')) . '</button></div>';
     }
 
-    /** Start discovery and authorization after the OAuth plugin's login form submits. */
+    /** Begin IndieAuth discovery and authorization. */
     public function login()
     {
         global $INPUT;
@@ -109,8 +77,8 @@ class action_plugin_oauthindie extends Adapter
             'me' => $me,
             'authorization_endpoint' => $endpoints['authorization_endpoint'],
             'token_endpoint' => $endpoints['token_endpoint'],
+            'issuer' => $endpoints['issuer'],
         ];
-
         $verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
         $_SESSION[DOKU_COOKIE]['auth']['oauthindie']['code_verifier'] = $verifier;
@@ -123,7 +91,7 @@ class action_plugin_oauthindie extends Adapter
         send_redirect((string)$url);
     }
 
-    /** Exchange callback code and verify that the provider authenticated this identity. */
+    /** Exchange callback code and validate RFC 9207 issuer when supplied. */
     public function checkToken()
     {
         global $INPUT;
@@ -133,33 +101,30 @@ class action_plugin_oauthindie extends Adapter
         if (empty($login['me']) || empty($login['code_verifier'])) {
             throw new OAuthException('IndieAuth login session has expired. Please try again.');
         }
-        if (!parent::checkToken()) return false;
 
-        $oauth = $this->getOAuthService();
-        $token = $oauth->getStorage()->retrieveAccessToken($oauth->service());
-        $params = $token->getExtraParams();
-        if (empty($params['me']) || $this->canonicalIdentity($params['me']) !== $this->canonicalIdentity($login['me'])) {
-            throw new OAuthException('IndieAuth token response did not confirm the requested identity.');
+        $callbackIssuer = $INPUT->get->str('iss', '');
+        if ($callbackIssuer !== '') {
+            $expectedIssuer = $login['issuer'] ?: $this->issuerFromEndpoint($login['authorization_endpoint'] ?? '');
+            if (!$expectedIssuer || $this->canonicalIssuer($callbackIssuer) !== $this->canonicalIssuer($expectedIssuer)) {
+                throw new OAuthException('IndieAuth authorization response issuer did not match the discovered server.');
+            }
         }
-        return true;
+
+        // Misskey's token response has access_token, token_type and scope but does not
+        // include IndieAuth's optional `me` property. The callback issuer plus successful
+        // PKCE token exchange is the applicable server validation for Misskey.
+        return parent::checkToken();
     }
 
-    /**
-     * Fetch the authenticated Misskey account and map it to DokuWiki user fields.
-     *
-     * @return array{user:string,name:string,mail:string,grps:array}
-     */
+    /** Extract current Misskey account and map it to DokuWiki user fields. */
     public function getUser()
     {
         $oauth = $this->getOAuthService();
         $login = $_SESSION[DOKU_COOKIE]['auth']['oauthindie'] ?? [];
-        $tokenEndpoint = $login['token_endpoint'] ?? '';
         $endpoint = $this->getConf('profileurl');
         if (!$endpoint) {
-            $parts = parse_url($tokenEndpoint);
-            if (!$parts || empty($parts['host'])) {
-                throw new OAuthException('Cannot determine Misskey instance for profile lookup.');
-            }
+            $parts = parse_url($login['token_endpoint'] ?? '');
+            if (!$parts || empty($parts['host'])) throw new OAuthException('Cannot determine Misskey instance for profile lookup.');
             $endpoint = 'https://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '') . '/api/i';
         }
 
@@ -179,39 +144,44 @@ class action_plugin_oauthindie extends Adapter
         if ($host === '') throw new OAuthException('Cannot determine account hostname from Misskey profile.');
 
         $user = $username . '@' . strtolower($host);
-        $mail = $user; // Misskey does not provide a deliverable email; this is the fediverse login identifier.
+        $mail = $user; // Synthetic federated identifier; not a deliverable email address.
         $name = trim((string)($profile['name'] ?? '')) ?: $username;
         $grps = [];
         return compact('user', 'name', 'mail', 'grps');
     }
 
-    /** @inheritDoc */
     public function getScopes()
     {
         $scopes = trim((string)$this->getConf('scopes'));
         return $scopes === '' ? ['read:account'] : preg_split('/\s+/', $scopes);
     }
 
-    /** @inheritDoc */
     public function getLabel()
     {
         return $this->getConf('label') ?: 'IndieAuth';
     }
 
-    /** @inheritDoc */
     public function getColor()
     {
         return $this->getConf('color') ?: '#333333';
     }
 
-    /** Compare canonical identity URLs while preserving path and query. */
-    private function canonicalIdentity($url)
+    /** Normalize issuer URL for RFC 9207 comparison. */
+    private function canonicalIssuer($issuer)
     {
-        $parts = parse_url((string)$url);
+        $parts = parse_url((string)$issuer);
         if (!$parts || empty($parts['host'])) return '';
-        $scheme = strtolower($parts['scheme'] ?? 'https');
+        $scheme = strtolower($parts['scheme'] ?? '');
         $host = strtolower($parts['host']);
         $port = isset($parts['port']) && !in_array($parts['port'], [80, 443], true) ? ':' . $parts['port'] : '';
-        return $scheme . '://' . $host . $port . ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
+        $path = rtrim($parts['path'] ?? '', '/');
+        return $scheme . '://' . $host . $port . $path;
+    }
+
+    private function issuerFromEndpoint($endpoint)
+    {
+        $parts = parse_url((string)$endpoint);
+        if (!$parts || empty($parts['host'])) return '';
+        return ($parts['scheme'] ?? 'https') . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
     }
 }

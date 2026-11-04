@@ -10,23 +10,14 @@ use dokuwiki\HTTP\DokuHTTPClient;
 
 class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
 {
-    /**
-     * Normalize a submitted hostname or identity URL into an HTTPS URL.
-     * A bare Misskey hostname such as misskey.example is accepted.
-     *
-     * @param string $identity
-     * @return string
-     * @throws InvalidArgumentException
-     */
+    /** Normalize a submitted hostname or identity URL into an HTTPS URL. */
     public function normalizeIdentity($identity)
     {
         $identity = trim((string)$identity);
         if ($identity === '') {
             throw new InvalidArgumentException($this->getLang('identityrequired'));
         }
-        if (!preg_match('~^https?://~i', $identity)) {
-            $identity = 'https://' . $identity;
-        }
+        if (!preg_match('~^https?://~i', $identity)) $identity = 'https://' . $identity;
         if (filter_var($identity, FILTER_VALIDATE_URL) === false) {
             throw new InvalidArgumentException($this->getLang('identityinvalid'));
         }
@@ -49,13 +40,10 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
     }
 
     /**
-     * Discover Misskey OAuth endpoints using RFC 8414 metadata at the instance origin.
-     * If no usable metadata document is published, fall back to IndieAuth rel links at
-     * the submitted identity URL.
+     * Discover Misskey OAuth endpoints using RFC 8414 server metadata first,
+     * with standard IndieAuth identity-page rel links as a fallback.
      *
-     * @param string $identity
-     * @return array{authorization_endpoint:string,token_endpoint:string}
-     * @throws RuntimeException
+     * @return array{authorization_endpoint:string,token_endpoint:string,issuer:?string}
      */
     public function discoverEndpoints($identity)
     {
@@ -64,8 +52,6 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         $origin = strtolower($parts['scheme']) . '://' . $parts['host'] .
             (isset($parts['port']) ? ':' . $parts['port'] : '');
 
-        // Misskey profile pages need not include endpoint rel links. Misskey publishes
-        // OAuth authorization server metadata for the whole instance at this URL.
         $metadataResponse = $this->fetchUrl($origin . '/.well-known/oauth-authorization-server', 'application/json');
         if ($metadataResponse !== false) {
             $metadata = json_decode($metadataResponse['body'], true);
@@ -73,11 +59,11 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
                 return [
                     'authorization_endpoint' => $this->validateEndpoint($metadata['authorization_endpoint']),
                     'token_endpoint' => $this->validateEndpoint($metadata['token_endpoint']),
+                    'issuer' => !empty($metadata['issuer']) ? $this->validateEndpoint($metadata['issuer']) : $origin,
                 ];
             }
         }
 
-        // Standard IndieAuth discovery from a user's identity page.
         $page = $this->fetchUrl($identity, 'text/html, application/xhtml+xml;q=0.9, */*;q=0.1');
         if ($page !== false) {
             $found = ['authorization_endpoint' => null, 'token_endpoint' => null];
@@ -107,14 +93,17 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
             }
 
             if (!empty($found['authorization_endpoint']) && !empty($found['token_endpoint'])) {
-                return $found;
+                return [
+                    'authorization_endpoint' => $found['authorization_endpoint'],
+                    'token_endpoint' => $found['token_endpoint'],
+                    'issuer' => null,
+                ];
             }
         }
 
         throw new RuntimeException($this->getLang('noauthorizationendpoint'));
     }
 
-    /** Fetch a public HTTPS URL with redirects disabled. */
     private function fetchUrl($url, $accept)
     {
         $parts = parse_url($url);
@@ -125,13 +114,10 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         $http->timeout = 10;
         $http->max_redirect = 0;
         $http->headers['Accept'] = $accept;
-        if (!$http->sendRequest($url, '', 'GET') || $http->status < 200 || $http->status >= 300) {
-            return false;
-        }
+        if (!$http->sendRequest($url, '', 'GET') || $http->status < 200 || $http->status >= 300) return false;
         return ['body' => (string)$http->resp_body, 'headers' => (array)$http->resp_headers];
     }
 
-    /** Validate a discovered authorization or token endpoint. */
     private function validateEndpoint($url)
     {
         if (!is_string($url) || trim($url) === '') {
@@ -145,7 +131,6 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         return $url;
     }
 
-    /** Validate and store a discovered endpoint from a Link header or HTML link element. */
     private function recordEndpoint(array &$found, $rel, $href, $base)
     {
         $rel = strtolower($rel);
@@ -153,7 +138,6 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         $found[$rel] = $this->validateEndpoint($this->resolveUrl($base, $href));
     }
 
-    /** Resolve an endpoint reference against the identity URL. */
     private function resolveUrl($base, $reference)
     {
         if (preg_match('~^https://~i', $reference)) return $reference;
@@ -164,7 +148,6 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         return $origin . rtrim(dirname($parts['path'] ?? '/'), '/') . '/' . $reference;
     }
 
-    /** Parse Link header entries, including multiple rel values on a link. */
     private function parseLinkHeader($header)
     {
         $links = [];
@@ -178,7 +161,6 @@ class helper_plugin_oauthindie extends \dokuwiki\Extension\Plugin
         return $links;
     }
 
-    /** Reject loopback, private, reserved, and unresolved hostnames. */
     private function assertPublicHost($host)
     {
         if (filter_var($host, FILTER_VALIDATE_IP)) {
