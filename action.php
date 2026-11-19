@@ -57,7 +57,7 @@ class action_plugin_oauthindie extends Adapter
     {
         return '<div class="plugin_oauthindie_login">' .
             '<label for="oauthindie-me">' . hsc($this->getLang('identitylabel')) . '</label> ' .
-            '<input id="oauthindie-me" type="text" name="me" required autocomplete="url" ' .
+            '<input id="oauthindie-me" type="text" name="me" autocomplete="url" ' .
                 'placeholder="' . hsc($this->getLang('identityplaceholder')) . '" ' .
                 'pattern="[A-Za-z0-9.-]+(:[0-9]+)?(/[^ ]*)?" ' .
                 'title="' . hsc($this->getLang('identityinvalid')) . '" /> ' .
@@ -159,18 +159,18 @@ class action_plugin_oauthindie extends Adapter
 
     public function getScopes()
     {
-        $scopes = trim((string)$this->getConf('scopes'));
+        $scopes = trim((string)$this->getConf('api_scopes'));
         return $scopes === '' ? ['read:account'] : preg_split('/\s+/', $scopes);
     }
 
     public function getLabel()
     {
-        return $this->getConf('label') ?: 'IndieAuth';
+        return $this->getConf('button_label') ?: 'IndieAuth';
     }
 
     public function getColor()
     {
-        return $this->getConf('color') ?: '#333333';
+        return $this->getConf('button_color') ?: '#333333';
     }
 
     private function canonicalIssuer($issuer)

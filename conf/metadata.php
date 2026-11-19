@@ -3,7 +3,6 @@
  * Configuration metadata for the oauthindie plugin.
  */
 
-$meta['scopes'] = array('string');
-$meta['profileurl'] = array('string');
-$meta['label'] = array('string');
-$meta['color'] = array('string');
+$meta['api_scopes'] = array('string');
+$meta['button_label'] = array('string');
+$meta['button_color'] = array('string');
